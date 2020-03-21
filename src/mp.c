@@ -163,7 +163,28 @@ static uint32_t is_valid_hex_char (const char c)
 
 static char hex_convert (char c)
 {
-  return (c & 15) + (c >> 6) * 9;
+  /* Allowed cases are */
+  /* [A-Fa-f] characters */
+  /* [0-9] characters */
+                   /* 'A' -> 01000001 */
+                   /* 'a' -> 01100001 */
+                   /* '1' -> 00110001 */
+  return (c & 15)  /* 15  -> 00001111 = Lowest 4bits */
+       + (c >> 6)  /* 01000000 -> 01 000000 -> 000000 01 */
+       * 9;
+  /* i.e. If char c is 'A'
+   *
+   * (c & 15)
+   * = 1
+   *
+   * // Because `>> 6` operator cut off lower 6bits,
+   * // 'A' and 'a' treated as same.
+   * ((c >> 6) * 9)
+   * = (1 * 9)
+   * = 9
+   *
+   * 1 + 9 = 10 = 0xA
+   */
 }
 
 static void add_cs_buf (const char *input_buf, cs_t *css, const int css_cnt)
@@ -180,12 +201,15 @@ static void add_cs_buf (const char *input_buf, cs_t *css, const int css_cnt)
 
     if (css[css_cnt].cs_uniq[u] == 1) continue;
 
+    // Mark as unique character
     css[css_cnt].cs_uniq[u] = 1;
+    // Assign current character to buffer
     css[css_cnt].cs_buf[pos] = input_buf[i];
 
     pos++;
   }
 
+  // Charset total length
   css[css_cnt].cs_len = pos;
   css[css_cnt].cs_pos = 0;
   css[css_cnt].buf_pos = css_cnt;
@@ -215,22 +239,28 @@ static size_t mp_expand (const char *in_buf, const size_t in_len, char *out_buf,
 
     if (p0 == '?')
     {
-      in_pos++;
+      in_pos++;  // Skip question mark
 
-      char p1 = in_buf[in_pos];
+      char p1 = in_buf[in_pos];  // Character next to '?'
 
       switch (p1)
       {
+        // ?l = abcdefghijklmnopqrstuvwxyz
         case 'l': strcat (out_buf, mp_sys[0]);
                   break;
+        // ?u = ABCDEFGHIJKLMNOPQRSTUVWXYZ
         case 'u': strcat (out_buf, mp_sys[1]);
                   break;
+        // ?d = 0123456789
         case 'd': strcat (out_buf, mp_sys[2]);
                   break;
+        // ?s = «space»!"#$%&'()*+,-./:;<=>?@[]^_`{|}~
         case 's': strcat (out_buf, mp_sys[3]);
                   break;
+        // ?a = ?l?u?d?s
         case 'a': strcat (out_buf, mp_sys[4]);
                   break;
+        // ?b = 0x00 - 0xff
         case 'b': memcpy (out_buf, mp_sys[5], 256);
                   break;
         case '?': strcat (out_buf, "?");
@@ -263,13 +293,15 @@ static size_t mp_expand (const char *in_buf, const size_t in_len, char *out_buf,
 
         char s[2] = { 0, 0 };
 
-        s[0]  = hex_convert (p1) << 0;
-        s[0] |= hex_convert (p0) << 4;
+        // Fit p1, p0 into s[0] as a hex value -> e.g. FF
+        s[0]  = hex_convert (p1) << 0;  // Low 4bits
+        s[0] |= hex_convert (p0) << 4;  // High 4bits
 
         strcat (out_buf, s);
       }
       else
       {
+        // Else, put p0 directly on out_buf
         char s[2] = { p0, 0 };
 
         strcat (out_buf, s);
@@ -319,6 +351,10 @@ static int next (char *word_buf, cs_t *css_buf, const int pos, int *occurs)
 
 static int find_pos (cs_t *cs, char c)
 {
+  /*
+   * Search character index from charset,
+   * Return -1 when character not found.
+   */
   int i;
 
   for (i = 0; i < cs->cs_len; i++)
@@ -529,20 +565,27 @@ int main (int argc, char *argv[])
   int pos;
   int chr;
 
+  // Fill mp_sys[0][N] with [a-z]
   for (pos = 0, chr =  'a'; chr <=  'z'; chr++) { donec[chr] = 1;
                                                   mp_sys[0][pos++] = chr; }
 
+  // Fill mp_sys[1][N] with [A-Z]
   for (pos = 0, chr =  'A'; chr <=  'Z'; chr++) { donec[chr] = 1;
                                                   mp_sys[1][pos++] = chr; }
 
+  // Fill mp_sys[2][N] with [0-9]
   for (pos = 0, chr =  '0'; chr <=  '9'; chr++) { donec[chr] = 1;
                                                   mp_sys[2][pos++] = chr; }
 
+  // Fill mp_sys[3][N] with [0x20-0x7e]
+  // But, skip chracters in range of [A-Za-z0-9]
   for (pos = 0, chr = 0x20; chr <= 0x7e; chr++) { if (donec[chr]) continue;
                                                   mp_sys[3][pos++] = chr; }
 
+  // Fill mp_sys[4][N] with [0x20-0x7e]
   for (pos = 0, chr = 0x20; chr <= 0x7e; chr++) { mp_sys[4][pos++] = chr; }
 
+  // Fill mp_sys[5][N] with [0x00-0xff]
   for (pos = 0, chr = 0x00; chr <= 0xff; chr++) { mp_sys[5][pos++] = chr; }
 
   if (custom_charset_1) mp_expand (custom_charset_1, strlen (custom_charset_1), mp_user[0], mp_sys, hex_charset);
@@ -617,6 +660,7 @@ int main (int argc, char *argv[])
                   css[css_cnt].cs_len = 256;
                   css_cnt++;
                   break;
+        /* Custom charsets 1 ~ 4 */
         case '1': add_cs_buf (mp_user[0], css, css_cnt);
                   css_cnt++;
                   break;
@@ -629,6 +673,7 @@ int main (int argc, char *argv[])
         case '4': add_cs_buf (mp_user[3], css, css_cnt);
                   css_cnt++;
                   break;
+        /* "??" as '?' */
         case '?': add_cs_buf ("?", css, css_cnt);
                   css_cnt++;
                   break;
@@ -803,7 +848,7 @@ int main (int argc, char *argv[])
     int off = len - seq_max + 1;
 
     seq_start[len] = (off > 0) ? off : 0;
-  }
+  }  // len == PW_MAX - 1
 
   out_t *out = malloc (sizeof (out_t));
 
@@ -928,10 +973,13 @@ int main (int argc, char *argv[])
         if (i < len) continue;
       }
 
+      // Write word buffer to output buffer and move forward
       memcpy (out->buf + out->pos, word_buf, word_len);
 
       out->pos += word_len;
 
+      // If `stop at` option activated
+      // Check and break the loop
       if (stop_at)
       {
         if (memcmp (word_buf + first, stop_at + first, len - first) == 0)
@@ -945,6 +993,8 @@ int main (int argc, char *argv[])
         }
       }
 
+      // If current position is smaller than output buffer size
+      // Keep continue
       if (out->pos < OUTBUFSZ) continue;
 
       fwrite (out->buf, 1, out->pos, fp_out);
@@ -957,6 +1007,7 @@ int main (int argc, char *argv[])
     out->pos = 0;
   }
 
+  // Close file handler if it is not stdout
   if (fp_out != stdout) fclose (fp_out);
 
   return 0;
